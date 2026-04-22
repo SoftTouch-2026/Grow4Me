@@ -1,0 +1,53 @@
+{
+  "trained_at_utc": "2026-04-20T16:52:22.769986+00:00",
+  "best_model_name": "XGBoost Regressor",
+  "feature_columns": [
+    "drought_flood_index",
+    "savings_usd",
+    "payment_frequency",
+    "acres",
+    "repayment_rate",
+    "yield_avg",
+    "farmer_budget_ghs",
+    "endorsements",
+    "market_access_index",
+    "training_sessions",
+    "livestock_value_usd",
+    "alternative_income_usd",
+    "digital_score",
+    "soil_health_index",
+    "gender_female",
+    "is_association_member",
+    "has_motorbike",
+    "satellite_verified",
+    "irrigation_scheme",
+    "insurance_subscription",
+    "irr_none",
+    "irr_canal",
+    "irr_drip",
+    "ins_none",
+    "ins_crop",
+    "ins_livestock",
+    "ins_both",
+    "has_staple",
+    "has_cash_crop",
+    "has_vegetable",
+    "has_other"
+  ],
+  "metrics": {
+    "Linear Regression": {
+      "MAE": 2.2765226584137976,
+      "RMSE": 3.124300300457022,
+      "R2": 0.9420821164735407
+    },
+    "XGBoost Regressor": {
+      "MAE": 2.097327278137208,
+      "RMSE": 2.592954525793926,
+      "R2": 0.9601069774260099
+    }
+  },
+  "artifacts": {
+    "linear_regression": "artifacts\\linear_regression.joblib",
+    "xgboost_regressor": "artifacts\\xgboost_regressor.json"
+  }
+}
