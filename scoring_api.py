@@ -1,10 +1,11 @@
 import json
+import io
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import xgboost as xgb
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from xgboost import XGBRegressor
 
@@ -64,6 +65,23 @@ class ScoreResponse(BaseModel):
 class CombinedScoreResponse(BaseModel):
     rule_based: ScoreResponse
     xgboost: ScoreResponse
+
+
+class BatchScoreRequest(BaseModel):
+    farmers: list[RawFarmerInput]
+
+
+class BatchRuleScoreItem(BaseModel):
+    row_index: int
+    farmer_id: int | None = None
+    score: float
+    band: str
+    reasoning: str
+
+
+class BatchRuleScoreResponse(BaseModel):
+    count: int
+    results: list[BatchRuleScoreItem]
 
 
 def _to_usd(usd_value: float | None, ghs_value: float | None, label: str) -> float:
@@ -167,6 +185,23 @@ def _build_xgb_features(payload: RawFarmerInput, feature_columns: list[str]) -> 
     return pd.DataFrame([ordered], columns=feature_columns)
 
 
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    normalized = df.copy()
+    normalized.columns = [str(c).strip().lower().replace(" ", "_") for c in normalized.columns]
+    return normalized
+
+
+def _rows_to_raw_inputs(df: pd.DataFrame) -> list[RawFarmerInput]:
+    out: list[RawFarmerInput] = []
+    for _, row in df.iterrows():
+        payload_dict = {
+            k: (None if pd.isna(v) else v)
+            for k, v in row.to_dict().items()
+        }
+        out.append(RawFarmerInput(**payload_dict))
+    return out
+
+
 class ModelService:
     def __init__(self, metadata_path: str = "artifacts/model_metadata.json") -> None:
         self.metadata_path = Path(metadata_path)
@@ -239,29 +274,115 @@ class ModelService:
             xgboost=self.score_xgboost(payload),
         )
 
+    def score_rule_based_batch(self, payloads: list[RawFarmerInput]) -> list[BatchRuleScoreItem]:
+        if not payloads:
+            return []
+
+        results: list[BatchRuleScoreItem] = []
+        for i, p in enumerate(payloads):
+            rb = self.score_rule_based(p)
+            results.append(
+                BatchRuleScoreItem(
+                    row_index=i,
+                    farmer_id=p.farmer_id,
+                    score=rb.score,
+                    band=rb.band,
+                    reasoning=rb.reasoning,
+                )
+            )
+
+        return results
+
 
 app = FastAPI(title="GrowForMe Dual Scoring API", version="1.0.0")
-service = ModelService()
+service: ModelService | None = None
+startup_error: str | None = None
+
+
+def get_service() -> ModelService:
+    global service
+    if service is None:
+        service = ModelService()
+    return service
+
+
+@app.on_event("startup")
+def initialize_service() -> None:
+    global startup_error
+    try:
+        get_service()
+        startup_error = None
+    except Exception as exc:
+        startup_error = str(exc)
+        # Keep the API process alive so /health can report actionable diagnostics.
+        print(f"[STARTUP WARNING] Model service failed to initialize: {startup_error}")
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    if startup_error:
+        return {
+            "status": "degraded",
+            "reason": startup_error,
+        }
     return {"status": "ok"}
 
 
 @app.post("/score/rule-based", response_model=ScoreResponse)
 def score_rule_based_route(payload: RawFarmerInput) -> ScoreResponse:
-    return service.score_rule_based(payload)
+    return get_service().score_rule_based(payload)
 
 
 @app.post("/score/xgboost", response_model=ScoreResponse)
 def score_xgboost_route(payload: RawFarmerInput) -> ScoreResponse:
-    return service.score_xgboost(payload)
+    return get_service().score_xgboost(payload)
 
 
 @app.post("/score/both", response_model=CombinedScoreResponse)
 def score_both_route(payload: RawFarmerInput) -> CombinedScoreResponse:
-    return service.score_both(payload)
+    return get_service().score_both(payload)
+
+
+@app.post("/score/batch/both", response_model=BatchRuleScoreResponse)
+def score_both_batch_route(req: BatchScoreRequest) -> BatchRuleScoreResponse:
+    # Kept this route for backward compatibility. It now returns rule-based-only results.
+    results = get_service().score_rule_based_batch(req.farmers)
+    return BatchRuleScoreResponse(count=len(results), results=results)
+
+
+@app.post("/score/batch/rule-based", response_model=BatchRuleScoreResponse)
+def score_rule_based_batch_route(req: BatchScoreRequest) -> BatchRuleScoreResponse:
+    results = get_service().score_rule_based_batch(req.farmers)
+    return BatchRuleScoreResponse(count=len(results), results=results)
+
+
+@app.post("/score/batch/rule-based/csv", response_model=BatchRuleScoreResponse)
+async def score_rule_based_batch_csv(file: UploadFile = File(...)) -> BatchRuleScoreResponse:
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a CSV file.")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded.")
+
+    try:
+        df = pd.read_csv(io.StringIO(text))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to parse CSV: {exc}")
+
+    if df.empty:
+        return BatchRuleScoreResponse(count=0, results=[])
+
+    df = _normalize_columns(df)
+    try:
+        farmers = _rows_to_raw_inputs(df)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"CSV row validation failed: {exc}")
+
+    results = get_service().score_rule_based_batch(farmers)
+    return BatchRuleScoreResponse(count=len(results), results=results)
 
 
 if __name__ == "__main__":
@@ -293,4 +414,4 @@ if __name__ == "__main__":
         soil_health_index=71,
         farmer_budget_ghs=6200,
     )
-    print(service.score_both(demo).model_dump())
+    print(get_service().score_both(demo).model_dump())
