@@ -24,9 +24,7 @@ def print_rule_based_section(example_farmer: pd.Series, component_df: pd.DataFra
     )
     workbook_score = float(example_farmer["Credit Score"])
 
-    print("=" * 90)
     print("PART 1 - RULE-BASED SCORING ENGINE")
-    print("=" * 90)
     print(f"Example Farmer: {example_farmer['Farmer Name']} (ID: {int(example_farmer['Farmer Id'])})")
     print(f"Rule-based Credit Score: {result.score:.2f}")
     print(f"Rule-based Category: {result.band}")
@@ -36,7 +34,7 @@ def print_rule_based_section(example_farmer: pd.Series, component_df: pd.DataFra
     if abs(score_gap) > 0.01:
         has_budget_component = "Farmer Budget" in component_df.columns
         print(
-            "Note: Formula-derived score and workbook score differ. "
+            "Note: Formula-derived score and workbook score differ."
             f"Delta={score_gap:+.2f}."
         )
         if has_budget_component:
@@ -72,9 +70,8 @@ def print_ml_section(ml_df: pd.DataFrame, farmer_id: int) -> tuple[float, str]:
     artifacts = train_regression_models(ml_df)
     saved = save_trained_models(artifacts)
 
-    print("\n" + "=" * 90)
+
     print("PART 2 - ML MODELING (REGRESSION)")
-    print("=" * 90)
     print("Model evaluation on test set:")
 
     for model_name in ["Linear Regression", "XGBoost Regressor"]:
@@ -118,9 +115,7 @@ def print_comparison_section(rule_score: float, rule_band: str, ml_score: float,
     diff = ml_score - rule_score
     agreement = "agree" if rule_band == ml_band else "diverge"
 
-    print("\n" + "=" * 90)
     print("PART 3 - RULE VS ML COMPARISON")
-    print("=" * 90)
     print(f"Rule-based score/category: {rule_score:.2f} / {rule_band}")
     print(f"ML-predicted score/category: {ml_score:.2f} / {ml_band}")
     print(f"Difference (ML - Rule): {diff:+.2f} points")
