@@ -185,6 +185,31 @@ def _build_xgb_features(payload: RawFarmerInput, feature_columns: list[str]) -> 
     return pd.DataFrame([ordered], columns=feature_columns)
 
 
+def _format_xgb_feature_value(feature_name: str, model_value: float, payload: RawFarmerInput) -> str:
+    if feature_name == "savings_usd":
+        if payload.savings_usd is not None:
+            return f"{payload.savings_usd:.2f} USD (model={model_value:.2f} USD)"
+        if payload.savings_ghs is not None:
+            return f"{payload.savings_ghs:.2f} GHS (model={model_value:.2f} USD)"
+
+    if feature_name == "livestock_value_usd":
+        if payload.livestock_value_usd is not None:
+            return f"{payload.livestock_value_usd:.2f} USD (model={model_value:.2f} USD)"
+        if payload.livestock_value_ghs is not None:
+            return f"{payload.livestock_value_ghs:.2f} GHS (model={model_value:.2f} USD)"
+
+    if feature_name == "alternative_income_usd":
+        if payload.alternative_income_usd is not None:
+            return f"{payload.alternative_income_usd:.2f} USD (model={model_value:.2f} USD)"
+        if payload.alternative_income_ghs is not None:
+            return f"{payload.alternative_income_ghs:.2f} GHS (model={model_value:.2f} USD)"
+
+    if feature_name == "yield_avg":
+        return f"avg={model_value:.2f} from '{payload.yield_data}'"
+
+    return f"{model_value:.2f}"
+
+
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     normalized = df.copy()
     normalized.columns = [str(c).strip().lower().replace(" ", "_") for c in normalized.columns]
@@ -263,7 +288,8 @@ class ModelService:
             f_label = FEATURE_PLAIN_ENGLISH.get(f_name, f_name.replace("_", " "))
             delta = feature_contribs[idx]
             direction = "increased" if delta >= 0 else "decreased"
-            explanations.append(f"{f_label} ({X.iloc[0, idx]}) {direction} score by {delta:+.2f}")
+            display_value = _format_xgb_feature_value(f_name, float(X.iloc[0, idx]), payload)
+            explanations.append(f"{f_label} ({display_value}) {direction} score by {delta:+.2f}")
 
         reasoning = "Top XGBoost drivers: " + "; ".join(explanations) + "."
         return ScoreResponse(score=round(score, 2), band=band, reasoning=reasoning)
